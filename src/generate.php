@@ -1,6 +1,11 @@
 <?php
 // generate.php
 
+// ** for testing purposes **
+// ini_set('display_errors', 1);
+// ini_set('display_startup_errors', 1);
+// error_reporting(E_ALL);
+
 // Ensure code parameter is present
 if (!isset($_GET['code'])) {
     header("HTTP/1.1 400 Bad Request");
@@ -11,12 +16,12 @@ if (!isset($_GET['code'])) {
 $code = $_GET['code'];
 
 // Sanitize input and convert to binary string
-if (ctype_digit($code)) {
-    // It's a number, convert to binary string
-    $binary_string = number_to_binary_string($code);
-} elseif (is_binary_string($code)) {
-    // It's a binary string
+if (is_binary_string($code)) {
+    // It's already a 36-digit binary string, use as-is
     $binary_string = $code;
+} elseif (ctype_digit($code)) {
+    // It's a decimal number, so convert it
+    $binary_string = number_to_binary_string((int)$code);
 } else {
     header("HTTP/1.1 400 Bad Request");
     echo "Invalid code.";
@@ -124,7 +129,7 @@ function generate_qyoo($width, $height, $fg_color, $dot_color, $bg_color, $binar
     $center_y = $height / 2;
 
     // Draw the foreground circle
-    imagefilledellipse($image, $center_x, $center_y, $radius * 2, $radius * 2, $fg_col);
+    imagefilledellipse($image, (int)$center_x, (int)$center_y, (int)($radius * 2), (int)($radius * 2), $fg_col);
 
     // Draw the foreground square
     $square_half = $square_size / 2;
@@ -151,7 +156,7 @@ function generate_qyoo($width, $height, $fg_color, $dot_color, $bg_color, $binar
             $y = $center_y - $square_size / 2 + $row * $square_size / $grid_size + $dot_radius;
 
             if ($binary_string[$binary_index] == '1') {
-                imagefilledellipse($image, $x, $y, $dot_radius * 2, $dot_radius * 2, $dot_col);
+                imagefilledellipse($image, (int)$x, (int)$y, (int)($dot_radius * 2), (int)($dot_radius * 2), $dot_col);
             }
             $binary_index++;
         }
