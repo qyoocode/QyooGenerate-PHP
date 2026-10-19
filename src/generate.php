@@ -1,116 +1,126 @@
 <?php
-// generate.php
+// BSD-3-Clause; see LICENSE. Historical PHP rendering geometry is preserved.
 
-// ** for testing purposes **
-// ini_set('display_errors', 1);
-// ini_set('display_startup_errors', 1);
-// error_reporting(E_ALL);
-
-// Ensure code parameter is present
-if (!isset($_GET['code'])) {
-    header("HTTP/1.1 400 Bad Request");
-    echo "Code parameter is missing.";
-    exit;
+function qyoo_parse_code($code) {
+    if (!is_string($code) || strlen($code) > 36) {
+        throw new InvalidArgumentException('Expected a decimal ID or exactly 36 binary digits.');
+    }
+    if (is_binary_string($code)) return $code;
+    if (!preg_match('/\A[0-9]+\z/', $code)) {
+        throw new InvalidArgumentException('Invalid decimal ID.');
+    }
+    $decimal = ltrim($code, '0');
+    if ($decimal === '') $decimal = '0';
+    if (strlen($decimal) > 11 || (strlen($decimal) === 11 && strcmp($decimal, '68719476735') > 0)) {
+        throw new InvalidArgumentException('ID exceeds 36 bits.');
+    }
+    if (PHP_INT_SIZE < 8) throw new RuntimeException('64-bit PHP is required.');
+    return str_pad(decbin((int)$decimal), 36, '0', STR_PAD_LEFT);
 }
 
-$code = $_GET['code'];
-
-// Sanitize input and convert to binary string
-if (is_binary_string($code)) {
-    // It's already a 36-digit binary string, use as-is
-    $binary_string = $code;
-} elseif (ctype_digit($code)) {
-    // It's a decimal number, so convert it
-    $binary_string = number_to_binary_string((int)$code);
-} else {
-    header("HTTP/1.1 400 Bad Request");
-    echo "Invalid code.";
-    exit;
+function is_binary_string($input) {
+    return is_string($input) && preg_match('/\A[01]{36}\z/', $input) === 1;
 }
 
-// Caching
-$cacheDir = __DIR__ . '/cache/';
-if (!is_dir($cacheDir)) {
-    mkdir($cacheDir, 0755, true);
+function number_to_binary_string($number) {
+    if (!is_int($number) && !is_string($number)) throw new InvalidArgumentException('Expected a decimal integer.');
+    // Decimal conversion must not interpret a decimal string as the binary input form.
+    $value = (string)$number;
+    if (strlen($value) > 11) throw new InvalidArgumentException('ID exceeds 36 bits.');
+    return qyoo_parse_code($value);
 }
 
-$fileName = $cacheDir . $binary_string . '.png';
-
-if (file_exists($fileName)) {
-    header('Content-Type: image/png');
-    readfile($fileName);
-    exit;
+function qyoo_png($bits) {
+    if (!is_binary_string($bits)) throw new InvalidArgumentException('Expected 36 payload bits.');
+    if (!extension_loaded('gd')) throw new RuntimeException('GD is required.');
+    $palette = ['#b51dff','#E91E63','#9C27B0','#673AB7','#3F51B5','#2196F3',
+        '#03A9F4','#00BCD4','#009688','#4CAF50','#8BC34A','#CDDC39',
+        '#FFC107','#FF9800','#FF5722','#795548','#9E9E9E','#607D8B'];
+    $background = $palette[array_rand($palette)];
+    $light = get_brightness($background) >= 128;
+    $image = generate_qyoo(2048, 2048, $light ? '#000000' : '#FFFFFF', $light ? '#FFFFFF' : '#000000', $background, $bits);
+    $final = null;
+    try {
+        $final = imagecreatetruecolor(512, 512);
+        if ($final === false) throw new RuntimeException('Image allocation failed.');
+        imagesavealpha($final, true);
+        imagealphablending($final, false);
+        if (!imagecopyresampled($final, $image, 0, 0, 0, 0, 512, 512, 2048, 2048)) {
+            throw new RuntimeException('Resampling failed.');
+        }
+        ob_start();
+        try {
+            if (!imagepng($final)) throw new RuntimeException('PNG encoding failed.');
+            $png = ob_get_contents();
+        } finally { ob_end_clean(); }
+        return $png;
+    } finally {
+        imagedestroy($image);
+        if ($final !== null && $final !== false) imagedestroy($final);
+    }
 }
 
-// Define a better color palette
-$color_palette = array(
-    '#b51dff', // Purple
-    '#E91E63', // Pink
-    '#9C27B0', // Deep Purple
-    '#673AB7', // Indigo
-    '#3F51B5', // Blue
-    '#2196F3', // Light Blue
-    '#03A9F4', // Cyan
-    '#00BCD4', // Teal
-    '#009688', // Green
-    '#4CAF50', // Light Green
-    '#8BC34A', // Lime
-    '#CDDC39', // Yellow
-    '#FFC107', // Amber
-    '#FF9800', // Orange
-    '#FF5722', // Deep Orange
-    '#795548', // Brown
-    '#9E9E9E', // Grey
-    '#607D8B'  // Blue Grey
-);
-
-// Randomize the background color
-$bg_color = $color_palette[array_rand($color_palette)];
-
-// Adjust foreground and dot colors based on background brightness
-$brightness = get_brightness($bg_color);
-
-if ($brightness >= 128) {
-    // Light background
-    $fg_color = '#000000'; // Black foreground
-    $dot_color = '#FFFFFF'; // White dots
-} else {
-    // Dark background
-    $fg_color = '#FFFFFF'; // White foreground
-    $dot_color = '#000000'; // Black dots
+function qyoo_cached_png($bits, $directory) {
+    if (!is_binary_string($bits)) throw new InvalidArgumentException('Expected 36 payload bits.');
+    if ($directory === '') return qyoo_png($bits);
+    if (!is_dir($directory) && !@mkdir($directory, 0770, true) && !is_dir($directory)) {
+        throw new RuntimeException('Cache directory unavailable.');
+    }
+    // Lock the image file itself so reads and writes use the same open descriptor.
+    $file = @fopen($directory . '/' . $bits . '.png', 'c+b');
+    if ($file === false) throw new RuntimeException('Cache file unavailable.');
+    try {
+        if (!flock($file, LOCK_EX)) throw new RuntimeException('Cache lock failed.');
+        $stat = fstat($file);
+        if ($stat === false || $stat['size'] > 1048576) throw new RuntimeException('Invalid cached image.');
+        if ($stat['size'] > 0) {
+            $png = stream_get_contents($file);
+            if ($png === false || strlen($png) !== $stat['size'] || substr($png, 0, 8) !== "\x89PNG\r\n\x1a\n") throw new RuntimeException('Cache read failed.');
+            return $png;
+        }
+        $png = qyoo_png($bits);
+        $offset = 0;
+        while ($offset < strlen($png)) {
+            $written = @fwrite($file, substr($png, $offset));
+            if ($written === false || $written === 0) throw new RuntimeException('Cache write failed.');
+            $offset += $written;
+        }
+        if (!fflush($file)) throw new RuntimeException('Cache flush failed.');
+        return $png;
+    } finally { flock($file, LOCK_UN); fclose($file); }
 }
 
-// Generate the Qyoo code image with anti-aliasing
-$scale = 4; // Scaling factor for anti-aliasing
-$final_width = 512;
-$final_height = 512;
-$width = $final_width * $scale;
-$height = $final_height * $scale;
-
-$image = generate_qyoo($width, $height, $fg_color, $dot_color, $bg_color, $binary_string);
-
-// Resize the image down to the desired size
-$final_image = imagecreatetruecolor($final_width, $final_height);
-
-// Enable alpha blending and save full alpha channel
-imagesavealpha($final_image, true);
-imagealphablending($final_image, false);
-
-// Resample the image
-imagecopyresampled($final_image, $image, 0, 0, 0, 0, $final_width, $final_height, $width, $height);
-
-// Save the image to cache
-imagepng($final_image, $fileName);
-imagedestroy($image);
-imagedestroy($final_image);
-
-// Serve the image
-header('Content-Type: image/png');
-readfile($fileName);
-
-// Function definitions
+function qyoo_serve() {
+    header('X-Content-Type-Options: nosniff');
+    header('Cache-Control: no-store');
+    try {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET') {
+            header('Allow: GET');
+            http_response_code(405);
+            header('Content-Type: text/plain; charset=utf-8');
+            echo "Use GET.\n";
+            return;
+        }
+        $bits = qyoo_parse_code($_GET['code'] ?? null);
+        $png = qyoo_cached_png($bits, getenv('QYOO_CACHE_DIR') ?: '');
+        header('Content-Type: image/png');
+        header('Content-Length: ' . strlen($png));
+        echo $png;
+    } catch (InvalidArgumentException $error) {
+        http_response_code(400);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "Expected an ID from 0 through 68719476735 or exactly 36 binary digits.\n";
+    } catch (Throwable $error) {
+        http_response_code(503);
+        header('Content-Type: text/plain; charset=utf-8');
+        echo "Image generation unavailable.\n";
+    }
+}
 
 function generate_qyoo($width, $height, $fg_color, $dot_color, $bg_color, $binary_string) {
+    if ($width !== 2048 || $height !== 2048 || !is_binary_string($binary_string)) {
+        throw new InvalidArgumentException("Expected a 2048px square and 36 payload bits.");
+    }
     // Create an image resource
     $image = imagecreatetruecolor($width, $height);
 
@@ -181,19 +191,9 @@ function allocate_color($image, $hex_color) {
     return imagecolorallocate($image, $r, $g, $b);
 }
 
-function is_binary_string($input) {
-    return strlen($input) == 36 && preg_match('/^[01]{36}$/', $input);
-}
-
-function number_to_binary_string($number) {
-    $binary_string = str_pad(decbin($number), 36, '0', STR_PAD_LEFT);
-    return $binary_string;
-}
-
 function get_brightness($hex_color) {
-    $hex_color = ltrim($hex_color, '#');
-    list($r, $g, $b) = sscanf($hex_color, "%02x%02x%02x");
-    // Calculate brightness using the luminosity method
+    list($r, $g, $b) = sscanf(ltrim($hex_color, '#'), "%02x%02x%02x");
     return (($r * 299) + ($g * 587) + ($b * 114)) / 1000;
 }
-?>
+
+if (realpath($_SERVER['SCRIPT_FILENAME'] ?? '') === __FILE__) qyoo_serve();
