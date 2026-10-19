@@ -20,7 +20,17 @@ foreach ($children as [$process,$pipes]) {
 if (count(array_unique($hashes)) !== 1 || strlen($hashes[0]) !== 64) throw new RuntimeException('Concurrent cache mismatch: '.json_encode($hashes));
 $path = $directory.'/'.str_repeat('1',36).'.png';
 if (!is_file($path)) throw new RuntimeException('Cache not persisted');
-file_put_contents($path, 'corrupt');
-try { qyoo_cached_png(str_repeat('1',36),$directory); throw new LogicException('Corrupt PNG served'); }
-catch (RuntimeException $expected) {}
-echo "PASS: concurrent cold cache, warm reads and corrupt-cache rejection\n";
+$valid = file_get_contents($path);
+$small = imagecreatetruecolor(1,1);
+ob_start(); imagepng($small); $smallPng = ob_get_clean(); imagedestroy($small);
+foreach (["\x89PNG\r\n\x1a\n", 'corrupt', substr($valid,0,40), $smallPng] as $badPng) {
+    file_put_contents($path, $badPng);
+    $repaired = qyoo_cached_png(str_repeat('1',36),$directory);
+    $decoded = @imagecreatefromstring($repaired);
+    if ($decoded === false || imagesx($decoded) !== 512 || imagesy($decoded) !== 512) {
+        throw new RuntimeException('Invalid cached image was not repaired');
+    }
+    imagedestroy($decoded);
+    if (file_get_contents($path) !== $repaired) throw new RuntimeException('Cache repair not persisted');
+}
+echo "PASS: concurrent cache and corrupt, signature-only, truncated, wrong-dimension repair\n";

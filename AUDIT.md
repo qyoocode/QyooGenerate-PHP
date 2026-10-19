@@ -35,12 +35,16 @@ git diff --check
 curl --max-time 15 -s -I https://id.qyoo.com/511305600
 ```
 
-- **PASS:** PHP syntax, decimal/binary boundaries, array/malformed/oversized input rejection, PNG signature/dimensions, historical row-major bit position, cache errors, HTTP 200/400/405 and headers, concurrent cache and corrupt-cache rejection on Linux tmpfs, whitespace check.
+- **PASS:** PHP syntax, decimal/binary boundaries, array/malformed/oversized input rejection, PNG signature/dimensions, historical row-major bit position, cache errors, HTTP 200/400/405 and headers, concurrent cache and corrupt/signature-only/truncated/wrong-dimension PNG repair on Linux tmpfs, whitespace check.
 - **FAIL:** Initial test before endpoint extraction exited with `Code parameter is missing.` instead of running assertions; fixed. Concurrent-cache tests on Docker Desktop host bind mount produced different hashes (and once a cache worker error); cache use on that storage remains unsupported. Reproduce with `docker run --rm --network none -v "$PWD:/app" -w /app qyoo-task02-php-gd:8.3 php tests/cache.php .codex-work/new-cache-path`.
-- **NOT RUN:** PHP 8.4/8.5, hosted CI execution, real camera/iOS detection round-trips, production hosting/load/memory exhaustion, write-failure injection after partial write, sample GET body verification at the hosted domain. Local `php` is not installed; containers supplied the supported runtime.
+- **NOT RUN:** PHP 8.4/8.5, hosted CI execution, real camera/iOS detection round-trips, production hosting/load/memory exhaustion, write-failure injection after partial write (subsequent truncated-cache recovery is tested), sample GET body verification at the hosted domain. Local `php` is not installed; containers supplied the supported runtime.
 
 ## Release gates and owner decisions
 
 Review the deliberate safety changes: out-of-range/invalid inputs are rejected, cache becomes opt-in, HTTP GET only, and the standalone helper constrains rendering dimensions to the endpoint's fixed 2048px intermediate. No payload serialization or historical endpoint appearance changed. Owner must decide whether to maintain this reference generator or sponsor a separately qualified current-renderer profile. Production operators must approve host limits, quotas, PHP patch updates and target-filesystem cache tests. Patent/trademark rights are not inferred from the BSD software grant.
 
 Storage check before/after this small phase: approximately 19.87/19.89 GiB available (concurrent workspace activity affects the figure); checkout including retained test scratch grew from 24 KiB to approximately 124 KiB before final documentation. No heavy build/install was started below the 20 GiB floor. Tiny failed-cache artifacts remain ignored under `.codex-work/` as reproducible evidence; no quarantine or cleanup was performed.
+
+## Follow-up review: cached PNG validation
+
+MEDIUM: signature and byte-length checks alone accepted an eight-byte PNG signature as a successful image. A failing regression reproduced this. Cached content now must report PNG format and fixed 512 × 512 dimensions before a full GD decode succeeds. Invalid content is regenerated under the existing exclusive file lock; generation finishes before existing cache bytes are replaced. Regression tests cover signature-only bytes, arbitrary corrupt bytes, a truncated valid PNG, and a valid PNG of the wrong dimensions, including persistence of the repaired result. The full PHP 8.3 syntax/unit/HTTP/Linux-tmpfs cache suite was rerun successfully; the documented Docker Desktop bind-mount cache limitation remains.

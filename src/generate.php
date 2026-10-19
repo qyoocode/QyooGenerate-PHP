@@ -75,10 +75,21 @@ function qyoo_cached_png($bits, $directory) {
         if ($stat === false || $stat['size'] > 1048576) throw new RuntimeException('Invalid cached image.');
         if ($stat['size'] > 0) {
             $png = stream_get_contents($file);
-            if ($png === false || strlen($png) !== $stat['size'] || substr($png, 0, 8) !== "\x89PNG\r\n\x1a\n") throw new RuntimeException('Cache read failed.');
-            return $png;
+            if ($png === false || strlen($png) !== $stat['size']) throw new RuntimeException('Cache read failed.');
+            // Check dimensions before decoding to bound allocations from corrupt cache data.
+            $dimensions = @getimagesizefromstring($png);
+            if ($dimensions !== false && $dimensions[0] === 512 && $dimensions[1] === 512
+                && $dimensions[2] === IMAGETYPE_PNG) {
+                $decoded = @imagecreatefromstring($png);
+                if ($decoded !== false) {
+                    imagedestroy($decoded);
+                    return $png;
+                }
+            }
         }
         $png = qyoo_png($bits);
+        // Recover interrupted or invalid generated cache content under the same lock.
+        if (!rewind($file) || !ftruncate($file, 0)) throw new RuntimeException('Cache repair failed.');
         $offset = 0;
         while ($offset < strlen($png)) {
             $written = @fwrite($file, substr($png, $offset));

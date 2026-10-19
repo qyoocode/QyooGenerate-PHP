@@ -25,7 +25,7 @@ The previous README named `id.qyoo.com` as a hosted image endpoint. An audit HEA
 
 ## Optional cache
 
-Caching is **off by default** to prevent arbitrary ID requests from filling disk. To enable it, set `QYOO_CACHE_DIR` to a dedicated absolute directory **outside the web document root**, writable only by the service account. The script creates a missing directory with mode 0770 subject to the process umask. All endpoint readers/writers lock the image file during reads and writes; reported I/O failures produce 503. Use a local filesystem with coherent file locks and metadata. The concurrency test failed on a Docker Desktop macOS host bind mount and passed on Linux tmpfs; Docker host bind mounts and network filesystems are unsupported cache locations. Run the cache test on the intended deployment filesystem before enabling it. Invalid cached PNG signatures/sizes are rejected. Do not expose the directory as static web content or share it with untrusted writers.
+Caching is **off by default** to prevent arbitrary ID requests from filling disk. To enable it, set `QYOO_CACHE_DIR` to a dedicated absolute directory **outside the web document root**, writable only by the service account. The script creates a missing directory with mode 0770 subject to the process umask. All endpoint readers/writers lock the image file during reads and writes; reported I/O failures produce 503. Use a local filesystem with coherent file locks and metadata. The concurrency test failed on a Docker Desktop macOS host bind mount and passed on Linux tmpfs; Docker host bind mounts and network filesystems are unsupported cache locations. Run the cache test on the intended deployment filesystem before enabling it. Cached files must decode as 512 × 512 PNGs; invalid generated cache content is regenerated under the file lock. Do not expose the directory as static web content or share it with untrusted writers.
 
 Apply a disk quota and operational retention policy before enabling this unbounded cache. There is no automatic eviction. Existing legacy cache files are not automatically migrated. Responses use `Cache-Control: no-store` because the palette is nondeterministic and this script does not implement HTTP revalidation. No external production services or package dependencies are required.
 
@@ -38,7 +38,7 @@ php tests/http.php
 php tests/cache.php .codex-work/test-cache
 ```
 
-The cache test requires a new directory for each invocation and retains its tiny test artifacts. Tests cover ID boundaries, malformed/array inputs, row-major historical geometry, PNG dimensions, HTTP status/headers, concurrent cache creation and invalid-cache handling. They do not establish camera scan accuracy. See [AUDIT.md](AUDIT.md) for verification limits.
+The cache test requires a new directory for each invocation and retains its tiny test artifacts. Tests cover ID boundaries, malformed/array inputs, row-major historical geometry, PNG dimensions, HTTP status/headers, concurrent cache creation and truncated/corrupt-cache repair. They do not establish camera scan accuracy. See [AUDIT.md](AUDIT.md) for verification limits.
 
 ## License
 
