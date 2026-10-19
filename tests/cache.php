@@ -21,6 +21,7 @@ if (count(array_unique($hashes)) !== 1 || strlen($hashes[0]) !== 64) throw new R
 $path = $directory.'/'.str_repeat('1',36).'.png';
 if (!is_file($path)) throw new RuntimeException('Cache not persisted');
 $valid = file_get_contents($path);
+if (hash('sha256', $valid) !== $hashes[0]) throw new RuntimeException('Workers did not return the persisted cache image');
 $small = imagecreatetruecolor(1,1);
 ob_start(); imagepng($small); $smallPng = ob_get_clean(); imagedestroy($small);
 foreach (["\x89PNG\r\n\x1a\n", 'corrupt', substr($valid,0,40), $smallPng] as $badPng) {

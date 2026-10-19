@@ -66,39 +66,46 @@ function qyoo_cached_png($bits, $directory) {
     if (!is_dir($directory) && !@mkdir($directory, 0770, true) && !is_dir($directory)) {
         throw new RuntimeException('Cache directory unavailable.');
     }
-    // Lock the image file itself so reads and writes use the same open descriptor.
-    $file = @fopen($directory . '/' . $bits . '.png', 'c+b');
-    if ($file === false) throw new RuntimeException('Cache file unavailable.');
+    // Serialize opening entries as well as I/O. On Docker Desktop bind mounts,
+    // simultaneous creation/opening allowed overlapping exclusive file locks.
+    // The directory exists before any worker opens it and provides a stable lock.
+    $directoryLock = @fopen($directory, 'r');
+    if ($directoryLock === false) throw new RuntimeException('Cache directory unavailable.');
     try {
-        if (!flock($file, LOCK_EX)) throw new RuntimeException('Cache lock failed.');
-        $stat = fstat($file);
-        if ($stat === false || $stat['size'] > 1048576) throw new RuntimeException('Invalid cached image.');
-        if ($stat['size'] > 0) {
-            $png = stream_get_contents($file);
-            if ($png === false || strlen($png) !== $stat['size']) throw new RuntimeException('Cache read failed.');
-            // Check dimensions before decoding to bound allocations from corrupt cache data.
-            $dimensions = @getimagesizefromstring($png);
-            if ($dimensions !== false && $dimensions[0] === 512 && $dimensions[1] === 512
-                && $dimensions[2] === IMAGETYPE_PNG) {
-                $decoded = @imagecreatefromstring($png);
-                if ($decoded !== false) {
-                    imagedestroy($decoded);
-                    return $png;
+        if (!flock($directoryLock, LOCK_EX)) throw new RuntimeException('Cache directory lock failed.');
+        $file = @fopen($directory . '/' . $bits . '.png', 'c+b');
+        if ($file === false) throw new RuntimeException('Cache file unavailable.');
+        try {
+            if (!flock($file, LOCK_EX)) throw new RuntimeException('Cache lock failed.');
+            $stat = fstat($file);
+            if ($stat === false || $stat['size'] > 1048576) throw new RuntimeException('Invalid cached image.');
+            if ($stat['size'] > 0) {
+                $png = stream_get_contents($file);
+                if ($png === false || strlen($png) !== $stat['size']) throw new RuntimeException('Cache read failed.');
+                // Check dimensions before decoding to bound allocations from corrupt cache data.
+                $dimensions = @getimagesizefromstring($png);
+                if ($dimensions !== false && $dimensions[0] === 512 && $dimensions[1] === 512
+                    && $dimensions[2] === IMAGETYPE_PNG) {
+                    $decoded = @imagecreatefromstring($png);
+                    if ($decoded !== false) {
+                        imagedestroy($decoded);
+                        return $png;
+                    }
                 }
             }
-        }
-        $png = qyoo_png($bits);
-        // Recover interrupted or invalid generated cache content under the same lock.
-        if (!rewind($file) || !ftruncate($file, 0)) throw new RuntimeException('Cache repair failed.');
-        $offset = 0;
-        while ($offset < strlen($png)) {
-            $written = @fwrite($file, substr($png, $offset));
-            if ($written === false || $written === 0) throw new RuntimeException('Cache write failed.');
-            $offset += $written;
-        }
-        if (!fflush($file)) throw new RuntimeException('Cache flush failed.');
-        return $png;
-    } finally { flock($file, LOCK_UN); fclose($file); }
+            $png = qyoo_png($bits);
+            // Recover interrupted or invalid generated cache content under the same lock.
+            if (!rewind($file) || !ftruncate($file, 0)) throw new RuntimeException('Cache repair failed.');
+            $offset = 0;
+            while ($offset < strlen($png)) {
+                $written = @fwrite($file, substr($png, $offset));
+                if ($written === false || $written === 0) throw new RuntimeException('Cache write failed.');
+                $offset += $written;
+            }
+            if (!fflush($file)) throw new RuntimeException('Cache flush failed.');
+            return $png;
+        } finally { flock($file, LOCK_UN); fclose($file); }
+    } finally { flock($directoryLock, LOCK_UN); fclose($directoryLock); }
 }
 
 function qyoo_serve() {
