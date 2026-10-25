@@ -1,157 +1,47 @@
-# Qyoo Code Generator
+# Qyoo PHP image generator
 
-This repository contains a PHP script (`src/generate.php`) that generates and caches unique Qyoo code images based on provided numeric or binary IDs. By accessing a specific URL with an ID parameter, the script dynamically creates a visually distinctive image associated with that ID.
+Qyoo is maintained by **Pushplay LLC**.
 
-## Features
+A reference PHP/GD generator for the historical Qyoo visual carrier. It accepts IDs from **0 through 68,719,476,735** and renders a 512 × 512 PNG containing 36 payload bits, most significant bit first in row-major order. Exactly 36 binary digits are also accepted; that form takes precedence over decimal parsing. Leading zeroes are accepted for decimal input up to 36 characters.
 
-- **Dynamic Image Generation**: Creates unique Qyoo code images based on numeric or binary IDs.
-- **Caching Mechanism**: Saves generated images to reduce server load and improve performance.
-- **Vibrant Color Palette**: Uses a diverse palette of background colors for visual appeal.
-- **Contrast Optimization**: Adjusts foreground and dot colors to maximize contrast with the background.
-- **Anti-Aliasing**: Implements image scaling to produce smoother edges and reduce pixelation.
+This is an image generator, not a Qyoo resolver, ID allocator, ownership registry, scanner, or Manifest service. Base36 routing used by other Qyoo applications is not accepted by this endpoint and does not change the payload bits.
 
-## How It Works
+## Status and geometry
 
-When a user accesses a URL like `http://id.qyoo.com/511305600`, the following process occurs:
+**Reference implementation.** This renderer retains its historical circle/square proportions, dot placement, randomized background palette and supersampling. Its carrier diameter is half the output width. It is **not geometrically identical** to the current Qyoo web renderer's `historical_svg_204` profile, which uses a 204-unit carrier in a 256-unit export. Binary payload ordering agrees; pixel equivalence and end-to-end iOS detection are not claimed. Do not use this repository to infer support for the proposed signature-cell/CRC-10 symbol.
 
-1. **Input Processing**:
-   - The script retrieves the `code` parameter from the URL.
-   - It checks if the `code` is a numeric value or a 36-character binary string.
-   - If the `code` is numeric, it converts it to a 36-digit binary string.
+## Run locally
 
-2. **Caching Mechanism**:
-   - The script checks if an image corresponding to the binary string already exists in the `cache` directory.
-   - If it exists, the cached image is served directly to the user.
-   - If not, the script proceeds to generate a new image.
+Use **64-bit PHP 8.3 or newer** with GD and PNG support. CI targets PHP 8.3–8.5; only 8.3 was exercised in the accompanying local audit. PHP 5.6 is unsupported.
 
-3. **Image Generation**:
-   - A background color is randomly selected from a predefined color palette.
-   - The brightness of the background color is calculated to determine optimal foreground and dot colors for maximum contrast.
-   - The script generates the Qyoo code image at a higher resolution to implement anti-aliasing.
-   - It draws the background, foreground shapes (circle and square), and a grid of dots based on the binary string.
-   - The image is then scaled down to the final size to smooth out edges.
-
-4. **Output**:
-   - The generated image is saved in the `cache` directory for future requests.
-   - The image is served to the user in PNG format.
-
-## Setup Instructions
-
-Follow these steps to set up the script on your web server:
-
-1. **Upload Files**:
-   - Place the `generate.php` script in your web server's document root or the desired subdirectory (e.g., `/var/www/html/` or `/home/username/public_html/`).
-   - Ensure a `cache` directory exists in the same location as `generate.php` and that it is writable by the web server.
-
-2. **Configure Web Server for Clean URLs**:
-   - To enable clean URLs like `http://id.qyoo.com/511305600`, configure your web server to route requests appropriately.
-   - For **Apache** servers, you can use an `.htaccess` file with rewrite rules.
-
-   **Example `.htaccess` Configuration**:
-
-   ```apache
-   RewriteEngine On
-   RewriteBase /
-
-   # If the request is for a file or directory that exists, don't rewrite
-   RewriteCond %{REQUEST_FILENAME} -f [OR]
-   RewriteCond %{REQUEST_FILENAME} -d
-   RewriteRule ^ - [L]
-
-   # Rewrite numeric codes to generate.php
-   RewriteRule ^([0-9]+)$ generate.php?code=$1 [L,QSA]
-
-   # Rewrite binary strings to generate.php (optional)
-   RewriteRule ^([01]{36})$ generate.php?code=$1 [L,QSA]
-   ```
-
-   - Place the `.htaccess` file in the same directory as `generate.php`.
-
-3. **Set Permissions**:
-   - Ensure the `cache` directory is writable by the web server.
-   - You can set the directory permissions to `0755` or `0775` as needed.
-
-4. **Verify PHP GD Extension**:
-   - Ensure the PHP GD library is installed and enabled on your server, as it is required for image creation and manipulation.
-
-## Usage
-
-To generate and view a Qyoo code image, navigate to your web server's URL followed by the desired ID.
-
-**Examples**:
-
-- **Numeric ID**: `https://id.qyoo.com/511305600`
-- **Binary ID**: `https://id.qyoo.com/101010101010101010101010101010101010`
-
-**What Happens**:
-
-- The script processes the provided ID and generates a unique Qyoo code image.
-- If the image has been previously generated, the cached version is served.
-- The image is displayed directly in the browser.
-
-## Customization
-
-You can customize various aspects of the script to suit your needs.
-
-### Color Palette
-
-Modify the `$color_palette` array in `generate.php` to change the background colors.
-
-```php
-// Define a custom color palette
-$color_palette = array(
-    '#b51dff', // Purple
-    '#E91E63', // Pink
-    '#9C27B0', // Deep Purple
-    // Add or remove colors as desired
-);
+```sh
+php -m                  # must include gd
+php -S 127.0.0.1:8080 -t src
 ```
 
-### Image Dimensions
+Open `http://127.0.0.1:8080/generate.php?code=511305600`, or supply an exactly 36-character binary payload. Invalid input returns 400; non-GET methods return 405; unavailable rendering/cache storage returns 503 with a generic message. Successful responses use `image/png` and `nosniff`.
 
-Adjust the `$final_width` and `$final_height` variables to change the output image size.
+The PHP development server is for local testing. A production host must configure its own PHP worker memory/concurrency limits, request-size limits, rate limits and HTTPS. Generation uses a fixed 2048 × 2048 intermediate image (approximately 16 MiB of raw pixel storage) and a fixed 512 × 512 output; reserve additional PHP/GD memory per worker. Requests cannot choose dimensions or colors. The historical random palette is preserved, so repeated uncached requests can differ.
 
-```php
-$final_width = 512;   // Set desired image width
-$final_height = 512;  // Set desired image height
+The previous README named `id.qyoo.com` as a hosted image endpoint. An audit HEAD request to `https://id.qyoo.com/511305600` returned HTTP 200 with `text/html`, not PNG. This repository does not establish its current operator or deployment. Host this script yourself; do not assume a resolver URL serves PNG images.
+
+## Optional cache
+
+Caching is **off by default** to prevent arbitrary ID requests from filling disk. To enable it, set `QYOO_CACHE_DIR` to a dedicated absolute directory **outside the web document root**, writable only by the service account. The script creates a missing directory with mode 0770 subject to the process umask. The cache requires a POSIX filesystem supporting directory and file locks. Each request locks the stable cache directory before opening an image entry, then also locks the image file during reads and writes; reported I/O failures produce 503. This serializes all requests sharing a cache directory, including different IDs. A directory lock avoids the observed Docker Desktop bind-mount race where simultaneous file creation allowed overlapping exclusive file locks. The corrected concurrency test passes on the local Docker Desktop macOS host bind mount and Linux tmpfs. Run the cache test on the intended deployment filesystem before enabling it; other hosts and network filesystems are unqualified. Cached files must decode as 512 × 512 PNGs; invalid generated cache content is regenerated under the file lock. Do not expose the directory as static web content or share it with untrusted writers.
+
+Apply a disk quota and operational retention policy before enabling this unbounded cache. There is no automatic eviction. Existing legacy cache files are not automatically migrated. Responses use `Cache-Control: no-store` because the palette is nondeterministic and this script does not implement HTTP revalidation. No external production services or package dependencies are required.
+
+## Tests
+
+```sh
+php -l src/generate.php
+php tests/test.php
+php tests/http.php
+php tests/cache.php .codex-work/test-cache
 ```
 
-### Caching Behavior
-
-Implement cache management if necessary:
-
-- **Cache Expiration**: Add logic to expire cached images after a certain period.
-- **Cache Cleanup**: Use a script or cron job to remove old cached images.
-
-### Anti-Aliasing Scale
-
-Change the `$scale` variable to adjust the level of anti-aliasing.
-
-```php
-$scale = 4; // Increase for smoother images, decrease for performance
-```
-
-## Dependencies
-
-- **PHP 5.6 or Higher**: The script is compatible with PHP versions supporting the GD library.
-- **PHP GD Library**: Ensure the GD extension is installed and enabled.
+The cache test requires a new directory for each invocation and retains its tiny test artifacts. Tests cover ID boundaries, malformed/array inputs, row-major historical geometry, PNG dimensions, HTTP status/headers, concurrent cache creation and truncated/corrupt-cache repair. They do not establish camera scan accuracy. See [AUDIT.md](AUDIT.md) for verification limits.
 
 ## License
 
-This project is licensed under the [BSD-3 Clause License](LICENSE). You are free to use, modify, and distribute this software as per the terms of the license.
-
-## Contributing
-
-Contributions are welcome! Feel free to:
-
-- Submit **issues** for bugs or feature requests.
-- Create **pull requests** to contribute code improvements or new features.
-
-Please ensure that your contributions align with the project's coding standards and include appropriate documentation.
-
-## Contact
-
-For questions, support, or suggestions:
-
-- **GitHub Issues**: [Create an issue](https://github.com/qyoocode/QyooGenerate-PHP/issues)
-- **Email**: [github@qyoo.com](mailto:github@qyoo.com)
+[BSD-3-Clause](LICENSE), copyright 2024 qyoo. PHP and the installed GD library are external runtime dependencies, not vendored here; distributors must honor their respective licenses. The software license makes no additional claim about patents or trademarks.
