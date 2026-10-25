@@ -1,5 +1,7 @@
 # Qyoo PHP image generator
 
+Qyoo is maintained by **Pushplay LLC**.
+
 A reference PHP/GD generator for the historical Qyoo visual carrier. It accepts IDs from **0 through 68,719,476,735** and renders a 512 × 512 PNG containing 36 payload bits, most significant bit first in row-major order. Exactly 36 binary digits are also accepted; that form takes precedence over decimal parsing. Leading zeroes are accepted for decimal input up to 36 characters.
 
 This is an image generator, not a Qyoo resolver, ID allocator, ownership registry, scanner, or Manifest service. Base36 routing used by other Qyoo applications is not accepted by this endpoint and does not change the payload bits.
